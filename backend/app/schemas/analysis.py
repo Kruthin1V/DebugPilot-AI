@@ -30,12 +30,20 @@ class AnalysisResponse(BaseModel):
     potential_issues: List[str] = Field(default_factory=list, description="Potential ATS or recruiter red flags")
     recommended_changes: List[str] = Field(default_factory=list, description="Specific rewrites or additions recommended")
 
+# Phase 3 Bullet Optimizer Schemas with Strict Factuality Support
 class ImproveBulletRequest(BaseModel):
-    bullet_point: str = Field(..., min_length=5, description="Original bullet point to rewrite")
+    bullet_point: str = Field(..., min_length=5, description="Original bullet point to optimize")
+    job_description: Optional[str] = Field(None, description="Optional target job description context")
+    target_role: Optional[str] = Field(None, description="Optional target job role title")
 
 class ImproveBulletResponse(BaseModel):
-    original_bullet: str
-    improved_bullet: str
+    original_bullet: str = Field(..., description="Original bullet point string")
+    improved_bullet: str = Field(..., description="Conservative, factually grounded optimized bullet point")
+    alternatives: List[str] = Field(default_factory=list, description="Factually grounded alternative rewritten versions")
+    improvements_made: List[str] = Field(default_factory=list, description="Explanation breakdown of formatting and clarity improvements")
+    supported_keywords: List[str] = Field(default_factory=list, description="Keywords already supported by original resume bullet")
+    suggested_keywords: List[str] = Field(default_factory=list, description="Keywords in job description NOT supported by original bullet")
+    warnings: List[str] = Field(default_factory=list, description="Warnings if original bullet lacks context or quantitative metrics")
 
 class InterviewQuestionItem(BaseModel):
     category: str

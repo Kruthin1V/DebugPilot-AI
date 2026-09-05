@@ -28,16 +28,29 @@ async def upload_resume(file: UploadFile = File(...)):
 
 @router.post("/improve", response_model=ImproveBulletResponse, status_code=status.HTTP_200_OK)
 async def improve_bullet(payload: ImproveBulletRequest):
-    """Rewrites bullet point into an ATS-optimized action statement."""
+    """
+    Rewrites a resume bullet point using Gemini AI while strictly enforcing factuality rules.
+    Never invents metrics, percentages, tools, or leadership/collaboration claims.
+    Returns supported_keywords (from resume) and suggested_keywords (from job post).
+    """
     if not payload.bullet_point or not payload.bullet_point.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Bullet point text cannot be empty."
         )
 
-    improved = await ai_service.improve_bullet(payload.bullet_point.strip())
-    
+    result_dict = await ai_service.improve_bullet(
+        bullet_point=payload.bullet_point.strip(),
+        job_description=payload.job_description.strip() if payload.job_description else None,
+        target_role=payload.target_role.strip() if payload.target_role else None
+    )
+
     return ImproveBulletResponse(
-        original_bullet=payload.bullet_point,
-        improved_bullet=improved
+        original_bullet=payload.bullet_point.strip(),
+        improved_bullet=result_dict.get("improved_bullet", payload.bullet_point),
+        alternatives=result_dict.get("alternatives", []),
+        improvements_made=result_dict.get("improvements_made", []),
+        supported_keywords=result_dict.get("supported_keywords", []),
+        suggested_keywords=result_dict.get("suggested_keywords", []),
+        warnings=result_dict.get("warnings", [])
     )

@@ -33,6 +33,11 @@ export interface AnalysisResult {
 export interface ImproveBulletResult {
   original_bullet: string;
   improved_bullet: string;
+  alternatives: string[];
+  improvements_made: string[];
+  supported_keywords: string[];
+  suggested_keywords: string[];
+  warnings: string[];
 }
 
 export interface InterviewQuestionItem {
@@ -69,9 +74,15 @@ export const analyzeResumeAndJob = async (resumeText: string, jobDescription: st
   return response.data;
 };
 
-export const improveResumeBullet = async (bulletPoint: string): Promise<ImproveBulletResult> => {
+export const improveResumeBullet = async (
+  bulletPoint: string,
+  jobDescription?: string,
+  targetRole?: string
+): Promise<ImproveBulletResult> => {
   const response = await axios.post<ImproveBulletResult>(`${API_BASE_URL}/resume/improve`, {
     bullet_point: bulletPoint,
+    job_description: jobDescription || undefined,
+    target_role: targetRole || undefined,
   });
   return response.data;
 };
