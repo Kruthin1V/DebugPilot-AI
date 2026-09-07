@@ -48,7 +48,11 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'interview' && (
-          <InterviewView resumeText={resumeText} jobDescription={jobDescription} />
+          <InterviewView
+            resumeText={resumeText}
+            jobDescription={jobDescription}
+            onNavigateToDashboard={() => setActiveTab('dashboard')}
+          />
         )}
       </main>
 

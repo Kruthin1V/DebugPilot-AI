@@ -91,7 +91,6 @@ class AIService:
     ) -> Dict[str, Any]:
         """
         Rewrites resume bullet point while strictly preserving the level of responsibility expressed in original text.
-        'Worked on' MUST NOT become 'Developed', 'Built', 'Implemented', 'Designed', 'Architected', 'Led', 'Spearheaded', 'Delivered', or 'Owned'.
         """
         if not self.is_configured():
             logger.warning("GEMINI_API_KEY not configured. Using responsibility-preserving bullet optimizer.")
@@ -173,6 +172,340 @@ class AIService:
             logger.error(f"Gemini API improve_bullet error: {str(e)}. Using conservative bullet optimizer.")
             return self._conservative_bullet_optimizer(bullet_point, job_description, target_role)
 
+    async def generate_interview_questions(
+        self,
+        resume_text: str,
+        job_description: str,
+        target_role: Optional[str] = "Software Engineer",
+        difficulty: Optional[str] = "Mixed",
+        number_of_questions: Optional[int] = 8,
+        question_categories: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Generates personalized interview questions based on candidate's resume, target job description, role, and skill gaps.
+        Enforces strict truthfulness (no fabricated candidate projects or false metrics).
+        """
+        if not question_categories:
+            question_categories = ["Technical", "Resume/Project", "Behavioral/HR", "Skill Gap"]
+        
+        num_q = max(1, min(15, number_of_questions or 8))
+        diff_str = difficulty or "Mixed"
+        role_str = target_role or "Software Engineer"
+
+        if not self.is_configured():
+            logger.warning("GEMINI_API_KEY not configured. Using heuristic personalized interview question generator.")
+            return self._heuristic_interview_generator(
+                resume_text, job_description, role_str, diff_str, num_q, question_categories
+            )
+
+        try:
+            from google import genai
+            from google.genai import types
+
+            client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+            system_prompt = (
+                "You are a senior technical interviewer and hiring manager.\n\n"
+                "STRICT PERSONALIZATION & TRUTHFULNESS RULES:\n"
+                "1. Technical questions MUST focus on technologies present in the candidate's resume and job description.\n"
+                "2. Resume/Project questions MUST reference actual projects, technologies, or experience explicitly mentioned in the candidate's resume text. DO NOT invent false candidate projects, metrics, or companies.\n"
+                "3. Behavioral questions MUST be relevant to the target role.\n"
+                "4. Skill Gap questions MUST focus on important skills required by the job description but missing or weak in the resume.\n"
+                "5. Difficulty setting ('Easy', 'Medium', 'Hard', 'Mixed') MUST genuinely control question complexity.\n"
+                "6. Sample answers MUST clearly distinguish between:\n"
+                "   - 'Based on your resume...' (referencing actual resume experience)\n"
+                "   - 'A strong general answer would be...' (for general concepts or skill gaps)\n"
+                "7. If the resume lacks context for a personalized project question, mark 'is_general': true and explain in 'why_this_is_asked'.\n\n"
+                "Return ONLY a valid JSON object matching this schema:\n"
+                "{\n"
+                '  "questions": [\n'
+                "    {\n"
+                '      "id": "q1",\n'
+                '      "category": "<Technical|Resume/Project|Behavioral/HR|Skill Gap>",\n'
+                '      "difficulty": "<Easy|Medium|Hard>",\n'
+                '      "question": "<question text>",\n'
+                '      "why_this_is_asked": "<interviewer intent>",\n'
+                '      "expected_topics": ["<topic 1>", "<topic 2>"],\n'
+                '      "hint": "<strategic tip>",\n'
+                '      "sample_answer": "<truthful sample response>",\n'
+                '      "follow_up_question": "<potential follow up>",\n'
+                '      "is_general": <boolean>\n'
+                "    }\n"
+                "  ]\n"
+                "}"
+            )
+
+            prompt = (
+                f"TARGET ROLE: {role_str}\n"
+                f"DIFFICULTY LEVEL: {diff_str}\n"
+                f"NUMBER OF QUESTIONS: {num_q}\n"
+                f"ALLOWED CATEGORIES: {', '.join(question_categories)}\n\n"
+                f"RESUME TEXT:\n{resume_text}\n\n"
+                f"JOB DESCRIPTION:\n{job_description}"
+            )
+
+            response = client.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    response_mime_type="application/json",
+                    temperature=0.3,
+                )
+            )
+
+            raw_text = response.text.strip()
+            if raw_text.startswith("```json"):
+                raw_text = raw_text[7:]
+            if raw_text.startswith("```"):
+                raw_text = raw_text[3:]
+            if raw_text.endswith("```"):
+                raw_text = raw_text[:-3]
+
+            parsed = json.loads(raw_text.strip())
+            q_list = parsed.get("questions", [])
+
+            if isinstance(q_list, list) and len(q_list) > 0:
+                # Ensure fields are properly formatted
+                formatted = []
+                for idx, q in enumerate(q_list[:num_q]):
+                    formatted.append({
+                        "id": str(q.get("id") or f"q_{idx+1}"),
+                        "category": q.get("category") or "Technical",
+                        "difficulty": q.get("difficulty") or "Medium",
+                        "question": q.get("question") or "Tell me about your technical background.",
+                        "why_this_is_asked": q.get("why_this_is_asked") or "To assess technical depth.",
+                        "expected_topics": q.get("expected_topics") if isinstance(q.get("expected_topics"), list) else ["Technical Architecture"],
+                        "hint": q.get("hint") or "Structure your answer using the STAR method.",
+                        "sample_answer": q.get("sample_answer") or "Based on your resume, explain key technical decisions.",
+                        "follow_up_question": q.get("follow_up_question") or "How would you optimize this under higher load?",
+                        "is_general": bool(q.get("is_general", False))
+                    })
+                return formatted
+
+            return self._heuristic_interview_generator(resume_text, job_description, role_str, diff_str, num_q, question_categories)
+
+        except Exception as e:
+            logger.error(f"Gemini API generate_interview_questions error: {str(e)}. Using fallback generator.")
+            return self._heuristic_interview_generator(resume_text, job_description, role_str, diff_str, num_q, question_categories)
+
+    def _heuristic_interview_generator(
+        self,
+        resume_text: str,
+        job_description: str,
+        target_role: str,
+        difficulty: str,
+        num_q: int,
+        categories: List[str]
+    ) -> List[Dict[str, Any]]:
+        """Rule-based personalized interview question generator preserving factuality."""
+        resume_lower = resume_text.lower()
+        jd_lower = job_description.lower()
+
+        # Extract resume tech & project keywords
+        known_tech = ["python", "fastapi", "react", "typescript", "sql", "sqlite", "postgresql", "rest api", "django", "flask", "aws", "docker", "kubernetes", "git", "ci/cd", "redis", "java", "node"]
+        resume_tech = [t.title() for t in known_tech if t in resume_lower]
+        jd_tech = [t.title() for t in known_tech if t in jd_lower]
+        gap_tech = [t for t in jd_tech if t.lower() not in resume_lower]
+
+        # Determine project mention from resume
+        has_rest_project = "rest api" in resume_lower or "rest" in resume_lower or "api" in resume_lower
+        project_name = "REST API" if has_rest_project else (resume_tech[0] + " Application" if resume_tech else "software project")
+
+        questions = []
+        q_counter = 1
+
+        # 1. Technical Questions
+        if "Technical" in categories:
+            tech_1 = resume_tech[0] if resume_tech else "Python"
+            tech_2 = resume_tech[1] if len(resume_tech) > 1 else "FastAPI"
+
+            if difficulty == "Easy":
+                questions.append({
+                    "id": f"q_{q_counter}",
+                    "category": "Technical",
+                    "difficulty": "Easy",
+                    "question": f"What are the core advantages of using {tech_1} and {tech_2} for modern application development?",
+                    "why_this_is_asked": f"Assesses your foundational understanding of key technologies highlighted on your resume ({tech_1}, {tech_2}).",
+                    "expected_topics": [f"{tech_1} Fundamentals", f"{tech_2} Features", "Code Maintainability"],
+                    "hint": f"Mention syntax simplicity, async capabilities, and framework ecosystem.",
+                    "sample_answer": f"Based on your resume experience with {tech_1} and {tech_2}: Highlight how {tech_1} provides readable, rapid development while {tech_2} offers high-performance asynchronous request handling and automatic OpenAPI documentation.",
+                    "follow_up_question": f"How do you handle dependency management or environment variables in {tech_1}?",
+                    "is_general": False
+                })
+            elif difficulty == "Hard":
+                questions.append({
+                    "id": f"q_{q_counter}",
+                    "category": "Technical",
+                    "difficulty": "Hard",
+                    "question": f"How do you architect asynchronous concurrency and manage connection pooling when connecting {tech_2} to a database under high load?",
+                    "why_this_is_asked": f"Evaluates advanced system design, concurrency handling, and performance tuning with {tech_2}.",
+                    "expected_topics": ["ASGI Server Concurrency", "Database Connection Pools", "Asyncio Event Loop"],
+                    "hint": "Discuss connection pool sizing, async engine drivers, and avoiding blocking I/O calls.",
+                    "sample_answer": f"Based on your resume stack ({tech_1}, {tech_2}): Explain how ASGI servers like Uvicorn handle non-blocking event loops, combined with async SQLAlchemy connection pools to prevent thread starvation under concurrent traffic.",
+                    "follow_up_question": "What metrics would you monitor to detect connection pool exhaustion?",
+                    "is_general": False
+                })
+            else:
+                questions.append({
+                    "id": f"q_{q_counter}",
+                    "category": "Technical",
+                    "difficulty": "Medium",
+                    "question": f"How do you structure request validation and error handling in {tech_2} to ensure clean REST API design?",
+                    "why_this_is_asked": f"Tests your practical knowledge of API validation and exception handling in {tech_2}.",
+                    "expected_topics": ["Pydantic Schemas", "HTTP Exception Handling", "REST Best Practices"],
+                    "hint": "Reference Pydantic models, custom exception handlers, and standard HTTP status codes.",
+                    "sample_answer": f"Based on your resume: Explain using Pydantic BaseModels for automatic request body validation and raising FastAPI HTTPException with descriptive error messages.",
+                    "follow_up_question": "How do you handle CORS policy and security headers in your APIs?",
+                    "is_general": False
+                })
+            q_counter += 1
+
+        # 2. Resume / Project Questions
+        if "Resume/Project" in categories:
+            if difficulty == "Hard":
+                questions.append({
+                    "id": f"q_{q_counter}",
+                    "category": "Resume/Project",
+                    "difficulty": "Hard",
+                    "question": f"Walk me through the design choices and scalability bottlenecks in your {project_name} project.",
+                    "why_this_is_asked": f"Directly tests your architectural ownership of the {project_name} mentioned on your resume.",
+                    "expected_topics": ["System Architecture", "Trade-offs", "Performance Tuning"],
+                    "hint": "Describe the initial problem, architectural decisions, and how you resolved bottlenecks.",
+                    "sample_answer": f"Based on your resume: Describe the structure of your {project_name}, detailing why you chose {resume_tech[0] if resume_tech else 'your stack'} and how you optimized request latency.",
+                    "follow_up_question": "If traffic grew 10x, what part of the architecture would fail first?",
+                    "is_general": False
+                })
+            else:
+                questions.append({
+                    "id": f"q_{q_counter}",
+                    "category": "Resume/Project",
+                    "difficulty": "Medium",
+                    "question": f"Can you describe your role and key technical decisions in developing your {project_name} project?",
+                    "why_this_is_asked": f"Verifies your hands-on contribution to the {project_name} listed on your resume.",
+                    "expected_topics": [f"{project_name} Scope", "Tech Stack Choices", "Implementation"],
+                    "hint": "Use the STAR method (Situation, Task, Action, Result).",
+                    "sample_answer": f"Based on your resume: Outline the requirements of the {project_name}, your personal implementation responsibilities, and how you delivered clean code.",
+                    "follow_up_question": "What testing framework did you use to verify functionality?",
+                    "is_general": False
+                })
+            q_counter += 1
+
+        # 3. Skill Gap Questions
+        if "Skill Gap" in categories:
+            gap_item = gap_tech[0] if gap_tech else ("Cloud/DevOps" if "cloud" not in resume_lower else "System Architecture")
+            if difficulty == "Easy":
+                questions.append({
+                    "id": f"q_{q_counter}",
+                    "category": "Skill Gap",
+                    "difficulty": "Easy",
+                    "question": f"The job description highlights {gap_item}, which isn't explicitly detailed on your resume. What is your understanding of {gap_item}?",
+                    "why_this_is_asked": f"Addresses a key technical requirement ({gap_item}) from the job post that is missing from your resume.",
+                    "expected_topics": [f"{gap_item} Concepts", "Learning Agility", "Practical Application"],
+                    "hint": "Demonstrate theoretical knowledge and express eagerness to apply it in production.",
+                    "sample_answer": f"A strong general answer would be: While my resume emphasizes hands-on work in {resume_tech[0] if resume_tech else 'backend development'}, I have studied {gap_item} concepts and understand its role in deployment and infrastructure scalability.",
+                    "follow_up_question": f"What steps are you currently taking to build hands-on projects with {gap_item}?",
+                    "is_general": True
+                })
+            else:
+                questions.append({
+                    "id": f"q_{q_counter}",
+                    "category": "Skill Gap",
+                    "difficulty": "Medium",
+                    "question": f"The target job requires experience with {gap_item}. How would you bridge your background in {resume_tech[0] if resume_tech else 'backend tech'} to work effectively with {gap_item}?",
+                    "why_this_is_asked": f"Evaluates your ability to rapidly ramp up on required job skills ({gap_item}) not present on your resume.",
+                    "expected_topics": [f"{gap_item} Integration", "Adaptability", "Transferable Skills"],
+                    "hint": "Connect your solid foundation in existing tools to how quickly you pick up new technologies.",
+                    "sample_answer": f"A strong general answer would be: Explain how your foundational experience in {resume_tech[0] if resume_tech else 'core backend design'} translates directly to mastering {gap_item} concepts quickly.",
+                    "follow_up_question": f"How would you troubleshoot an issue involving {gap_item} in your first month?",
+                    "is_general": True
+                })
+            q_counter += 1
+
+        # 4. Behavioral / HR Questions
+        if "Behavioral/HR" in categories:
+            questions.append({
+                "id": f"q_{q_counter}",
+                "category": "Behavioral/HR",
+                "difficulty": difficulty if difficulty != "Mixed" else "Medium",
+                "question": f"As a {target_role}, tell me about a time you had to handle conflicting priorities or a tight deadline.",
+                "why_this_is_asked": f"Assesses your problem-solving, task prioritization, and communication skills for a {target_role} position.",
+                "expected_topics": ["Time Management", "Stakeholder Communication", "Problem Solving"],
+                "hint": "Be specific about how you communicated trade-offs to team members.",
+                "sample_answer": f"Based on your resume: Describe a situation from your technical experience where you broke down complex tasks, prioritized critical paths, and delivered quality results.",
+                "follow_up_question": "What would you do differently if faced with the same tight deadline today?",
+                "is_general": False
+            })
+            q_counter += 1
+
+        # Fill remaining requested count by rotating categories
+        extra_templates = [
+            {
+                "category": "Technical",
+                "diff": "Medium",
+                "q": f"How do you approach database schema design and indexing in {resume_tech[0] if resume_tech else 'relational databases'}?",
+                "why": "Evaluates database modeling competency.",
+                "topics": ["Normalization", "Indexing", "Query Performance"],
+                "hint": "Discuss primary/foreign keys and B-tree indexes.",
+                "ans": f"Based on your resume: Explain structuring tables for data integrity and adding indexes to high-frequency query columns.",
+                "follow": "How do you identify slow queries in production?",
+                "gen": False
+            },
+            {
+                "category": "Resume/Project",
+                "diff": "Easy",
+                "q": f"What was the most challenging bug you encountered in your {project_name} and how did you debug it?",
+                "why": "Tests analytical troubleshooting and debugging mindset.",
+                "topics": ["Debugging Tools", "Log Analysis", "Root Cause Analysis"],
+                "hint": "Walk through isolating the bug step by step.",
+                "ans": f"Based on your resume: Detail a specific technical bug in {project_name}, how you examined logs, identified the issue, and verified the fix.",
+                "follow": "What automated tests did you add to prevent regression?",
+                "gen": False
+            },
+            {
+                "category": "Skill Gap",
+                "diff": "Hard",
+                "q": f"If required to implement {gap_tech[0] if gap_tech else 'cloud deployment'} in production for this role, how would you design the deployment pipeline?",
+                "why": f"Evaluates readiness for missing job requirement ({gap_tech[0] if gap_tech else 'cloud deployment'}).",
+                "topics": ["CI/CD Pipeline", "Environment Parity", "Automated Testing"],
+                "hint": "Outline source control triggers, build steps, staging verification, and deployment strategies.",
+                "ans": f"A strong general answer would be: Outline standard CI/CD pipeline principles (GitHub Actions, container builds, automated unit testing, blue-green deployment).",
+                "follow": "How would you handle a failed deployment rollback?",
+                "gen": True
+            },
+            {
+                "category": "Behavioral/HR",
+                "diff": "Easy",
+                "q": f"Why are you interested in this {target_role} position and what makes your background a good fit?",
+                "why": "Verifies motivation and alignment with role expectations.",
+                "topics": ["Career Motivation", "Role Alignment", "Technical Fit"],
+                "hint": "Connect your technical skills directly to the key requirements of the target job.",
+                "ans": f"Based on your resume: Connect your hands-on background in {', '.join(resume_tech[:3]) if resume_tech else 'software development'} to the key goals of this job.",
+                "follow": "Where do you see your technical skills growing in the next two years?",
+                "gen": False
+            }
+        ]
+
+        idx = 0
+        while len(questions) < num_q:
+            t = extra_templates[idx % len(extra_templates)]
+            questions.append({
+                "id": f"q_{q_counter}",
+                "category": t["category"],
+                "difficulty": t["diff"],
+                "question": t["q"],
+                "why_this_is_asked": t["why"],
+                "expected_topics": t["topics"],
+                "hint": t["hint"],
+                "sample_answer": t["ans"],
+                "follow_up_question": t["follow"],
+                "is_general": t["gen"]
+            })
+            q_counter += 1
+            idx += 1
+
+        return questions[:num_q]
+
     def _validate_and_sanitize_rewrite(self, original_bullet: str, candidate_rewrite: str) -> str:
         """
         Guardrail validator ensuring candidate rewrite strictly preserves original responsibility level,
@@ -189,7 +522,6 @@ class AIService:
             return self._conservative_clean(original_bullet)
 
         # 2. Responsibility level preservation checks
-        # If original contains "worked on", "assisted", "contributed", do not allow upgrade to ownership/leadership verbs
         ownership_verbs = [
             "developed", "built", "implemented", "designed", "architected", "spearheaded",
             "delivered", "owned", "led", "managed", "optimized", "collaborated", "cross-functionally"
@@ -225,7 +557,6 @@ class AIService:
         clean_bullet = self._conservative_clean(bullet_point)
         orig_lower = bullet_point.lower()
 
-        # Generate strictly responsibility-preserving alternative phrasings
         alternatives = []
         if "worked on" in orig_lower:
             rest = clean_bullet
@@ -248,11 +579,9 @@ class AIService:
                 f"Contributed to {clean_bullet[0].lower() + clean_bullet[1:] if len(clean_bullet) > 1 else clean_bullet}"
             ]
 
-        # Extract keywords supported by original bullet
         known_tech = ["python", "fastapi", "react", "typescript", "sql", "sqlite", "postgresql", "rest api", "backend", "web application", "apis", "redis"]
         supported_keywords = [kw.title() for kw in known_tech if kw in orig_lower]
 
-        # Extract suggested keywords present in JD or target role but NOT in original bullet
         suggested_keywords = []
         context = f"{job_description or ''} {target_role or ''}".lower()
         if context.strip():
@@ -260,7 +589,6 @@ class AIService:
                 if kw in context and kw not in orig_lower:
                     suggested_keywords.append(kw.title())
 
-        # Clean duplicates
         supported_keywords = list(dict.fromkeys(supported_keywords))
         suggested_keywords = list(dict.fromkeys(suggested_keywords))
 

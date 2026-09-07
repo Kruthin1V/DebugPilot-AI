@@ -41,9 +41,16 @@ export interface ImproveBulletResult {
 }
 
 export interface InterviewQuestionItem {
+  id: string;
   category: string;
-  question: string;
   difficulty: string;
+  question: string;
+  why_this_is_asked: string;
+  expected_topics: string[];
+  hint: string;
+  sample_answer: string;
+  follow_up_question: string;
+  is_general: boolean;
 }
 
 export interface InterviewQuestionsResult {
@@ -87,10 +94,21 @@ export const improveResumeBullet = async (
   return response.data;
 };
 
-export const generateInterviewQuestions = async (resumeText: string, jobDescription: string): Promise<InterviewQuestionsResult> => {
+export const generateInterviewQuestions = async (
+  resumeText: string,
+  jobDescription: string,
+  targetRole?: string,
+  difficulty?: string,
+  numberOfQuestions?: number,
+  questionCategories?: string[]
+): Promise<InterviewQuestionsResult> => {
   const response = await axios.post<InterviewQuestionsResult>(`${API_BASE_URL}/interview/questions`, {
     resume_text: resumeText,
     job_description: jobDescription,
+    target_role: targetRole || undefined,
+    difficulty: difficulty || undefined,
+    number_of_questions: numberOfQuestions || undefined,
+    question_categories: questionCategories || undefined,
   });
   return response.data;
 };

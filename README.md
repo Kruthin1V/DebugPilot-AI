@@ -1,6 +1,6 @@
 # 🚀 AI CareerPilot
 
-**AI CareerPilot** is a production-quality, resume-worthy AI-powered Resume and Job Matching platform. It empowers job seekers to upload PDF resumes, extract clean text content, compare their profile against job descriptions, evaluate ATS compatibility scores, rewrite weak bullets, and practice tailored interview questions.
+**AI CareerPilot** is a production-quality, resume-worthy AI-powered Resume and Job Matching platform. It empowers job seekers to upload PDF resumes, extract clean text content, compare their profile against job descriptions, evaluate ATS compatibility scores, rewrite weak bullets without inventing false metrics, and practice personalized interview preparation questions.
 
 ---
 
@@ -8,8 +8,8 @@
 - 📄 **PDF Resume Upload & Parser**: Secure text extraction from PDF documents using PyMuPDF.
 - 🎯 **ATS Compatibility & Job Match Scoring**: Automated scoring (0-100) analyzing keyword density and matching skills.
 - 🔍 **Skills Gap & Keyword Identification**: Breakdown of matching skills, missing technical skills, strengths, and weaknesses.
-- ✍️ **AI Resume Bullet Optimizer**: Interactive original vs AI-rewritten bullet points optimizer for high-impact resumes.
-- 💬 **Smart Interview Prep**: Category-based practice questions (Technical, Behavioral/HR, Project-based) with difficulty levels.
+- ✍️ **Fact-Preserved AI Resume Bullet Optimizer**: Interactive bullet optimizer with strict truthfulness constraints (never invents numbers, percentages, or ungrounded leadership claims).
+- 💬 **Personalized AI Interview Preparation**: Customized interview questions (Technical, Resume/Project, Behavioral/HR, Skill Gap) tailored to candidate resume, target job description, target role, and identified skill gaps, with expected topics, hints, sample answers, and follow-ups.
 - 💾 **Local Persistence**: Zero-complexity SQLite database via SQLAlchemy.
 - 🔒 **Security-First Design**: API keys stored in environment variables, file size validation (5MB limit), and file execution safeguards.
 
@@ -67,7 +67,7 @@ Copy the environment template:
 ```powershell
 Copy-Item .env.example .env
 ```
-Edit `.env` to add your `GEMINI_API_KEY` (required for Phase 2 AI features).
+Edit `.env` to add your `GEMINI_API_KEY`.
 
 ### 2. Start Backend Server
 ```powershell
@@ -106,13 +106,6 @@ Frontend Web Dashboard: [http://localhost:5173](http://localhost:5173)
 - [Architecture Details](docs/ARCHITECTURE.md)
 - [REST API Specifications](docs/API.md)
 - [Developer Setup Guide](docs/DEVELOPMENT.md)
-
----
-
-## 🔮 Future Roadmap
-- 📊 Historical analysis tracking & side-by-side resume comparison graphs.
-- 📝 PDF export of AI-optimized resumes.
-- 🎯 Role-specific resume templates and keyword recommendations.
 
 ---
 
